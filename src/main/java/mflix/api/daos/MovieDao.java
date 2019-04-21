@@ -118,11 +118,10 @@ public class MovieDao extends AbstractMFlixDao {
    */
   public List<Document> getMoviesByCountry(String... country) {
 
-    Bson queryFilter = new Document();
-    Bson projection = new Document();
-    //TODO> Ticket: Projection - implement the query and projection required by the unit test
+    Bson inCountries = Filters.in("countries", country);
+    Bson includeTitle = Projections.fields(Projections.include("title"));
     List<Document> movies = new ArrayList<>();
-
+    moviesCollection.find(inCountries).projection(includeTitle).into(movies);
     return movies;
   }
 
@@ -162,9 +161,10 @@ public class MovieDao extends AbstractMFlixDao {
    * @return List of documents sorted by sortKey that match the cast selector.
    */
   public List<Document> getMoviesByCast(String sortKey, int limit, int skip, String... cast) {
-    Bson castFilter = null;
-    Bson sort = null;
-    //TODO> Ticket: Subfield Text Search - implement the expected cast
+    // query filter
+    Bson castFilter = Filters.all("cast", cast);
+    // sort key
+    Bson sort = Sorts.descending(sortKey);
     // filter and sort
     List<Document> movies = new ArrayList<>();
     moviesCollection
@@ -276,6 +276,11 @@ public class MovieDao extends AbstractMFlixDao {
     // Your job is to order the stages correctly in the pipeline.
     // Starting with the `matchStage` add the remaining stages.
     pipeline.add(matchStage);
+
+    pipeline.add(sortStage);
+    pipeline.add(skipStage);
+    pipeline.add(limitStage);
+    pipeline.add(facetStage);
 
     moviesCollection.aggregate(pipeline).iterator().forEachRemaining(movies::add);
     return movies;
