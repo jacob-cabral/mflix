@@ -1,8 +1,6 @@
 package mflix.api.daos;
 
-import com.mongodb.MongoClientSettings;
-import com.mongodb.MongoWriteException;
-import com.mongodb.WriteConcern;
+import com.mongodb.*;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.Filters;
@@ -62,11 +60,16 @@ public class UserDao extends AbstractMFlixDao {
    */
   public boolean addUser(User user) {
     //TODO > Ticket: Durable Writes -  you might want to use a more durable write concern here!
-    usersCollection.insertOne(user);
-    return true;
     //TODO > Ticket: Handling Errors - make sure to only add new users
     // and not users that already exist.
+    if (user == null) throw new IllegalArgumentException("The user is null.");
 
+    try {
+      usersCollection.withWriteConcern(WriteConcern.MAJORITY).insertOne(user);
+      return true;
+    } catch (MongoException e) {
+      throw new IncorrectDaoOperation(e.getMessage(), e);
+    }
   }
 
   /**
@@ -79,6 +82,10 @@ public class UserDao extends AbstractMFlixDao {
   public boolean createUserSession(String userId, String jwt) {
     //TODO> Ticket: User Management - implement the method that allows session information to be
     // stored in it's designated collection.
+    if (userId == null) throw new IllegalArgumentException("The userId is null.");
+
+    if (jwt == null) throw new IllegalArgumentException("The jwt is null.");
+
     Session userSession = new Session();
     userSession.setUserId(userId);
     userSession.setJwt(jwt);
@@ -86,13 +93,9 @@ public class UserDao extends AbstractMFlixDao {
     try {
       sessionsCollection.insertOne(userSession);
       return true;
-    } catch (MongoWriteException e) {
-      log.error(e.getMessage(), e);
-      return false;
+    } catch (MongoException e) {
+      throw new IncorrectDaoOperation(e.getMessage(), e);
     }
-
-    //TODO > Ticket: Handling Errors - implement a safeguard against
-    // creating a session with the same jwt token.
   }
 
   /**
@@ -124,9 +127,8 @@ public class UserDao extends AbstractMFlixDao {
     try {
       sessionsCollection.deleteOne(Filters.eq("user_id", userId));
       return true;
-    } catch (MongoWriteException e) {
-      log.error(e.getMessage(), e);
-      return false;
+    } catch (MongoException e) {
+      throw new IncorrectDaoOperation(e.getMessage(), e);
     }
   }
 
@@ -141,15 +143,15 @@ public class UserDao extends AbstractMFlixDao {
     //TODO> Ticket: User Management - implement the delete user method
     //TODO > Ticket: Handling Errors - make this method more robust by
     // handling potential exceptions.
+    if (email == null) throw new IllegalArgumentException("The email is null.");
+
     try {
       deleteUserSessions(email);
       usersCollection.deleteOne(Filters.eq("email", email));
       return true;
-    } catch (MongoWriteException e) {
-      log.error(e.getMessage(), e);
-      return false;
+    } catch (MongoException e) {
+      throw new IncorrectDaoOperation(e.getMessage(), e);
     }
-
   }
 
   /**
@@ -165,6 +167,15 @@ public class UserDao extends AbstractMFlixDao {
     // be updated.
     //TODO > Ticket: Handling Errors - make this method more robust by
     // handling potential exceptions when updating an entry.
-    return false;
+    if (userPreferences == null)
+      throw new IncorrectDaoOperation("The user preferences cannot be set to null value.");
+
+    try {
+      deleteUserSessions(email);
+      usersCollection.updateOne(Filters.eq("email", email), Updates.set("preferences", userPreferences));
+      return true;
+    } catch (MongoException e) {
+      throw new IncorrectDaoOperation(e.getMessage(), e);
+    }
   }
 }

@@ -1,18 +1,16 @@
 package mflix.api.daos;
 
 import com.mongodb.MongoClientSettings;
-import com.mongodb.MongoWriteException;
-import com.mongodb.ReadConcern;
+import com.mongodb.MongoException;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
-import com.mongodb.client.model.Aggregates;
-import com.mongodb.client.model.Filters;
-import com.mongodb.client.model.Sorts;
-import com.mongodb.client.model.Updates;
+import com.mongodb.client.model.*;
 import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
 import mflix.api.models.Comment;
 import mflix.api.models.Critic;
+import org.bson.BsonString;
+import org.bson.BsonValue;
 import org.bson.Document;
 import org.bson.codecs.configuration.CodecRegistry;
 import org.bson.codecs.pojo.PojoCodecProvider;
@@ -24,9 +22,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import java.text.MessageFormat;
 import java.util.ArrayList;
-import java.util.Date;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.bson.codecs.configuration.CodecRegistries.fromProviders;
@@ -36,8 +33,10 @@ import static org.bson.codecs.configuration.CodecRegistries.fromRegistries;
 public class CommentDao extends AbstractMFlixDao {
 
   public static String COMMENT_COLLECTION = "comments";
+  public static String USER_COLLECTION = "users";
 
   private MongoCollection<Comment> commentCollection;
+  private MongoCollection<Critic> criticCollection;
 
   private CodecRegistry pojoCodecRegistry;
 
@@ -55,6 +54,9 @@ public class CommentDao extends AbstractMFlixDao {
             fromProviders(PojoCodecProvider.builder().automatic(true).build()));
     this.commentCollection =
         db.getCollection(COMMENT_COLLECTION, Comment.class).withCodecRegistry(pojoCodecRegistry);
+
+    this.criticCollection =
+        db.getCollection(USER_COLLECTION, Critic.class).withCodecRegistry(pojoCodecRegistry);
   }
 
   /**
@@ -79,12 +81,23 @@ public class CommentDao extends AbstractMFlixDao {
    * returns the resulting Comment object.
    */
   public Comment addComment(Comment comment) {
-
     // TODO> Ticket - Update User reviews: implement the functionality that enables adding a new
     // comment.
+    if (comment == null)
+      throw new IncorrectDaoOperation("The comment cannot be null.");
+
+    if (comment.getId() == null)
+      throw new IncorrectDaoOperation("The comment id cannot be null.");
+
     // TODO> Ticket - Handling Errors: Implement a try catch block to
     // handle a potential write exception when given a wrong commentId.
-    return null;
+    // return null;
+    try {
+        commentCollection.insertOne(comment);
+        return comment;
+    } catch (MongoException e) {
+        throw new IncorrectDaoOperation(e.getMessage(), e);
+    }
   }
 
   /**
@@ -102,11 +115,36 @@ public class CommentDao extends AbstractMFlixDao {
    */
   public boolean updateComment(String commentId, String text, String email) {
 
+    if (commentId == null)
+      throw new IncorrectDaoOperation("The comment id cannot be null.");
+
+    if (text == null)
+      throw new IncorrectDaoOperation("The comment text cannot be null.");
+
+    if (email == null)
+      throw new IncorrectDaoOperation("The comment e-mail cannot be null.");
+
     // TODO> Ticket - Update User reviews: implement the functionality that enables updating an
     // user own comments
+
     // TODO> Ticket - Handling Errors: Implement a try catch block to
     // handle a potential write exception when given a wrong commentId.
-    return false;
+    // return false;
+
+    try {
+      UpdateResult result = commentCollection.updateOne(Filters.and(
+            Filters.eq("_id", new ObjectId(commentId)), Filters.eq("email", email)),
+            Updates.set("text", text)
+      );
+
+      long modifiedCount = result.getModifiedCount();
+      BsonValue upsertedId = result.getUpsertedId();
+      boolean wasUpdated = modifiedCount > 0 || (upsertedId != null && upsertedId.asString().equals(new BsonString(commentId)));
+
+      return wasUpdated;
+    } catch (MongoException e) {
+      throw new IllegalArgumentException(e.getMessage(), e);
+    }
   }
 
   /**
@@ -122,7 +160,17 @@ public class CommentDao extends AbstractMFlixDao {
     // TIP: make sure to match only users that own the given commentId
     // TODO> Ticket Handling Errors - Implement a try catch block to
     // handle a potential write exception when given a wrong commentId.
-    return false;
+    // return false;
+    try {
+      DeleteResult result = commentCollection.deleteOne(
+              Filters.and(Filters.eq("_id", new ObjectId(commentId)), Filters.eq("email", email))
+      );
+
+      boolean wasDeleted = result.getDeletedCount() > 0;
+      return wasDeleted;
+    } catch (MongoException e) {
+      throw new IncorrectDaoOperation(e.getMessage(), e);
+    }
   }
 
   /**
@@ -140,6 +188,20 @@ public class CommentDao extends AbstractMFlixDao {
     // // guarantee for the returned documents. Once a commenter is in the
     // // top 20 of users, they become a Critic, so mostActive is composed of
     // // Critic objects.
+    List<Bson> pipeline = Arrays.asList(
+      Aggregates.match(new Document()),
+      Aggregates.lookup("comments", "email", "email", "comments"),
+      Aggregates.project(
+        Projections.fields(
+          Projections.computed("_id", "$email"),
+          Projections.computed("count", new Document("$size", "$comments"))
+        )
+      ),
+      Aggregates.sort(Sorts.descending("count")),
+      Aggregates.limit(20)
+    );
+
+    criticCollection.aggregate(pipeline).into(mostActive);
     return mostActive;
   }
 }
